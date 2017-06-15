@@ -1,0 +1,180 @@
+#!/bin/bash
+#
+# # Usage
+#
+# See the `print_help` function.
+#
+# # Synopsis
+#
+# Program to watch a directory full of Habitat configuration files and apply
+# the configuration if they change.
+#
+# # License and Copyright
+#
+# ```
+# Copyright: Copyright (c) 2017 Nathan L Smith <smith@nlsmith.com>
+# License: Apache License, Version 2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ```
+
+# Fail if there are any unset variables
+set -u
+
+# If the variable `$DEBUG` is set, then print the shell commands as we execute.
+if [ -n "${DEBUG:-}" ]; then
+  set -x
+  export DEBUG
+fi
+
+# TODO: Handle keys:
+#--org <ORG>      Name of service organization to use for encryption
+#-r, --ring <RING>    Ring key name, which will encrypt communication messages
+#-u, --user <USER>    Name of a user key to use for encryption
+
+# **Internal** Prints help
+print_help() {
+  printf -- "$program $version
+$author
+
+Apply Habitat configuration from a directory of files. Will watch for changes
+and apply configuration when changes happen.
+
+USAGE:
+  $program [FLAGS] [OPTIONS] [DIRECTORY]
+FLAGS:
+    -h, --help                      Prints help information
+    -V, --version                   Prints version information
+OPTIONS:
+    -c, --version-command=<COMMAND> The command to run to determine the version to
+                                    use for configuration application. Default is 'date +%%s', which gives the
+                                    current epoch time. Be sure to use single quotes on the command line so the
+                                    command is evaluated when the configuration is applied instead of when the
+                                    program starts. If the directory is a git repository, the default will be
+                                    'git rev-list --count HEAD' to get a count of commits in the repository.
+    -p, --peer=<PEER>               A comma-delimited list of one or more Habitat Supervisor peers (default: 127.0.0.1:9638)
+ARGS:
+    [DIRECTORY]                     The directory to watch. '.' will be used if none is given.
+"
+}
+
+# **Internal** Exit the program with an error message and a status code.
+#
+# ```sh
+# exit_with "Something bad went down" 55
+# ```
+exit_with() {
+  case "${TERM:-}" in
+    *term | xterm-* | rxvt | screen | screen-*)
+      printf -- "\033[1;31mERROR: \033[1;37m$1\033[0m\n"
+      ;;
+    *)
+      printf -- "ERROR: $1\n"
+      ;;
+  esac
+  exit "$2"
+}
+
+# **Internal** Print a warning line on stderr. Takes the rest of the line as its
+# only argument.
+#
+# ```sh
+# warn "Checksum failed"
+# ```
+warn() {
+  case "${TERM:-}" in
+    *term | xterm-* | rxvt | screen | screen-*)
+      printf -- "\033[1;33mWARN: \033[1;37m$1\033[0m\n" >&2
+      ;;
+    *)
+      printf -- "WARN: $1\n" >&2
+      ;;
+  esac
+}
+
+# The current version of this program
+version="@version@"
+# The author of this program
+author="@author@"
+# The short version of the program name which is used in logging output
+program="$(basename "$0")"
+
+# Initial values for variables
+dir=.
+peer=127.0.0.1:9638
+version_command='date +%s'
+
+opts="$(getopt \
+  --longoptions help,peer:,version,version-command: \
+  --name "$program" --options h,p,V,c -- "$@" \
+)"
+eval set -- "$opts"
+
+while :; do
+    case "$1" in
+      -h | --help)
+        print_help
+        exit
+        ;;
+      -V | --version)
+        echo "$program $version"
+        exit
+        ;;
+      -c | --version-command)
+        version_command=$2
+        shift 2
+        ;;
+      -p | --peer)
+        peer="${2:-$peer}"
+        shift 2
+        ;;
+      --)
+        shift
+        dir=${*:-$dir}
+        break
+        ;;
+      *)
+        exit_with "Unknown error" 1
+        exit 1
+        ;;
+    esac
+done
+
+# Applies config to a service group based on its filename.
+# `config_apply /src/redis.default.toml` will apply config to the
+# `redis.default` service group using the /src/redis.default.toml file.
+config_apply() {
+  hab config apply "$peer" "$(basename "$1" .toml)" "$(eval "$version_command")" "$1"
+}
+
+dir="$(realpath "$dir")"
+peer="--peer=$peer"
+regex="^${dir//\//\\/}\/[a-zA-Z0-9_-]*\.[a-zA-Z0-9\_-]*@?[a-zA-Z0-9\_-]+\.toml$"
+cd "$dir" || exit_with "Directory $dir does not exist" 1
+
+# TODO Git
+if find "$dir" -regex "$regex" -type f -exec false {} +; then
+  warn "No TOML files found in $dir"
+else
+  # Apply all initially
+  find "$dir" -regex "$regex" -type f | while read -r file; do
+    config_apply "$file"
+  done
+fi
+
+# Watch for changes
+fswatch --event=Created --event=Updated --print0 . | while read -d "" -r file; do
+  if [[ "$file" =~ $regex ]]; then
+    config_apply "$file"
+  fi
+done
