@@ -1,3 +1,16 @@
-# Use this file to templatize your application's native configuration files.
-# See the docs at https://www.habitat.sh/docs/create-packages-configure/.
-# You can safely delete this file if you don't need it.
+# The directory to watch. '.' will be used if none is given.
+dir = "."
+
+# A comma-delimited list of one or more Habitat Supervisor peers
+peer = "127.0.0.1:9638"
+
+# The command to run to determine the version to use for configuration
+# application. Default is 'date +%%s', which gives the current epoch time. Be
+# sure to use single quotes on the command line so the command is evaluated
+# when the configuration is applied instead of when the program starts. If the
+# directory is a git repository, the default will be 'git rev-list --count
+# HEAD' to get a count of commits in the repository.
+version_command = ""
+
+# Run in debug mode
+debug = false

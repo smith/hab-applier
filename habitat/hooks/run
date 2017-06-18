@@ -1,0 +1,13 @@
+#!{{pkgPathFor "core/bash"}}/bin/bash
+
+exec 2>&1
+
+if [[ -n "{{cfg.version_command}}" ]]; then
+  version_command='--version-command='{{cfg.version_command}}''
+fi
+
+if [[ -n "{{cfg.debug}}" ]]; then
+  export DEBUG=1
+fi
+
+exec hab-applier $version_command --peer="{{cfg.peer}}" "{{cfg.dir}}"

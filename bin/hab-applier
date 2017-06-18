@@ -32,6 +32,7 @@
 set -u
 
 # If the variable `$DEBUG` is set, then print the shell commands as we execute.
+DEBUG=
 if [ -n "${DEBUG:-}" ]; then
   set -x
   export DEBUG
@@ -112,7 +113,12 @@ program="$(basename "$0")"
 # Initial values for variables
 dir=.
 peer=127.0.0.1:9638
-version_command='date +%s'
+
+if git rev-parse --git-dir > /dev/null 2>&1; then
+  version_command='git rev-list --count HEAD'
+else
+  version_command='date +%s'
+fi
 
 opts="$(getopt \
   --longoptions help,peer:,version,version-command: \
@@ -154,15 +160,21 @@ done
 # `config_apply /src/redis.default.toml` will apply config to the
 # `redis.default` service group using the /src/redis.default.toml file.
 config_apply() {
-  hab config apply "$peer" "$(basename "$1" .toml)" "$(eval "$version_command")" "$1"
+  hab-butterfly config apply "$peer" "$(basename "$1" .toml)" "$(eval "$version_command")" "$1"
 }
 
 dir="$(realpath "$dir")"
 peer="--peer=$peer"
 regex="^${dir//\//\\/}\/[a-zA-Z0-9_-]*\.[a-zA-Z0-9\_-]*@?[a-zA-Z0-9\_-]+\.toml$"
+
+if [[ -n "$DEBUG" ]]; then
+  verbose=--verbose
+else
+  verbose=
+fi
+
 cd "$dir" || exit_with "Directory $dir does not exist" 1
 
-# TODO Git
 if find "$dir" -regex "$regex" -type f -exec false {} +; then
   warn "No TOML files found in $dir"
 else
@@ -173,7 +185,7 @@ else
 fi
 
 # Watch for changes
-fswatch --event=Created --event=Updated --print0 . | while read -d "" -r file; do
+fswatch "$verbose" --event=Created --event=Updated --print0 . | while read -d "" -r file; do
   if [[ "$file" =~ $regex ]]; then
     config_apply "$file"
   fi
